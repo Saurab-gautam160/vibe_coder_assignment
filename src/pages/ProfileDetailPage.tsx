@@ -1,163 +1,326 @@
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
 import { Layout } from "@/components/Layout";
+import { ShortlistButton } from "@/components/ShortlistButton";
 import { VerifiedBadge } from "@/components/VerifiedBadge";
-import type { FullUserProfile, ProfileDetailResponse } from "@/types";
-import { formatEngagementRate } from "@/utils/formatters";
+import { useShortlistStore } from "@/store/shortlistStore";
+import type { FullUserProfile, Platform, UserProfileSummary } from "@/types";
+import { extractProfiles } from "@/utils/dataHelpers";
 import { loadProfileByUsername } from "@/utils/profileLoader";
 
-function formatFollowersDetail(count: number) {
-  if (count >= 1000000) return (count / 1000000).toFixed(2) + "M";
-  if (count >= 1000) return (count / 1000).toFixed(1) + "K";
-  return String(count);
+const platformTheme: Record<
+  Platform,
+  { banner: string; badge: string; accent: string }
+> = {
+  instagram: {
+    banner: "bg-linear-to-br from-pink-600/30 via-purple-600/20 to-slate-900",
+    badge: "bg-pink-500/20 text-pink-200 border-pink-500/30",
+    accent: "text-pink-300",
+  },
+  youtube: {
+    banner: "bg-linear-to-br from-red-600/30 via-rose-600/15 to-slate-900",
+    badge: "bg-red-500/20 text-red-200 border-red-500/30",
+    accent: "text-red-300",
+  },
+  tiktok: {
+    banner: "bg-linear-to-br from-cyan-500/25 via-teal-500/15 to-slate-900",
+    badge: "bg-cyan-500/20 text-cyan-100 border-cyan-500/30",
+    accent: "text-cyan-300",
+  },
+};
+
+function toSummary(profile: FullUserProfile): UserProfileSummary {
+  return {
+    user_id: profile.user_id,
+    username: profile.username,
+    url: profile.url,
+    picture: profile.picture,
+    fullname: profile.fullname,
+    is_verified: profile.is_verified,
+    followers: profile.followers,
+    engagements: profile.engagements,
+    engagement_rate: profile.engagement_rate,
+  };
+}
+
+// Added this to handle massive numbers gracefully (e.g. 651.6M instead of 651,606,250)
+function formatCompactNumber(value?: number) {
+  if (value == null) return "N/A";
+  return Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function formatNumber(value?: number) {
+  if (value == null) return "N/A";
+  return value.toLocaleString();
+}
+
+function formatRate(value?: number) {
+  if (value == null) return "N/A";
+  return `${(value * 100).toFixed(2)}%`;
 }
 
 export function ProfileDetailPage() {
   const { username } = useParams<{ username: string }>();
   const [searchParams] = useSearchParams();
-  const platform = searchParams.get("platform") || "unknown";
-  const [profileData, setProfileData] = useState<ProfileDetailResponse | null>(
-    null
+  const navigate = useNavigate();
+
+  const platform = (searchParams.get("platform") as Platform) || "instagram";
+  const [profile, setProfile] = useState<FullUserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const addProfile = useShortlistStore((s) => s.addProfile);
+  const removeProfile = useShortlistStore((s) => s.removeProfile);
+  const isSelected = useShortlistStore((s) =>
+    profile ? s.isSelected(profile.user_id) : false,
   );
-  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    if (!username) return;
+    let cancelled = false;
 
-    loadProfileByUsername(username).then((data) => {
-      setProfileData(data);
-      setLoaded(true);
-    });
-  }, [username]);
+    const fetchProfile = async () => {
+      if (!username) return;
 
-  if (!username) {
+      setLoading(true);
+
+      const response = await loadProfileByUsername(username);
+      const detailed = response?.data?.user_profile ?? null;
+
+      if (!cancelled) {
+        if (detailed) {
+          setProfile(detailed);
+        } else {
+          const fallback = extractProfiles(platform).find(
+            (p) => p.username.toLowerCase() === username.toLowerCase(),
+          );
+          setProfile(fallback ?? null);
+        }
+        setLoading(false);
+      }
+    };
+
+    fetchProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [username, platform]);
+
+  const theme = platformTheme[platform];
+
+  if (loading) {
     return (
       <Layout>
-        <p>Invalid profile</p>
-        <Link to="/">Back</Link>
+        <BackButton onClick={() => navigate(-1)} />
+        <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/60 shadow-2xl">
+          <div className="h-48 w-full bg-white/5 animate-pulse" />
+          <div className="relative -mt-16 px-6 pb-8 sm:px-10">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-end">
+                <div className="h-28 w-28 rounded-2xl bg-slate-800 ring-4 ring-slate-900 animate-pulse sm:h-32 sm:w-32" />
+                <div className="flex-1 space-y-3 pb-1 w-48">
+                  <div className="h-8 w-full rounded-lg bg-white/10 animate-pulse" />
+                  <div className="h-4 w-32 rounded-lg bg-white/5 animate-pulse" />
+                </div>
+              </div>
+            </div>
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-24 rounded-2xl bg-white/5 animate-pulse"
+                />
+              ))}
+            </div>
+          </div>
+        </div>
       </Layout>
     );
   }
 
-  if (!loaded) {
+  if (!profile) {
     return (
-      <Layout title={`@${username}`}>
-        <p className="text-gray-400">Loading...</p>
+      <Layout>
+        <BackButton onClick={() => navigate(-1)} />
+        <div className="flex flex-col items-center justify-center py-24 bg-slate-800/20 rounded-3xl border border-slate-700/30 backdrop-blur-md shadow-inner text-center">
+          <div className="text-6xl mb-5 opacity-50 drop-shadow-lg">🕵️‍♂️</div>
+          <h2 className="mb-2 text-xl font-bold text-white tracking-tight">
+            Profile not found
+          </h2>
+          <p className="text-slate-400 font-medium">
+            We couldn&apos;t find data for @{username} on {platform}.
+          </p>
+        </div>
       </Layout>
     );
   }
 
-  if (!profileData) {
-    return (
-      <Layout title={`@${username}`}>
-        <p className="text-red-600 mb-4">
-          Could not load profile details for {username}
-        </p>
-        <Link to="/" className="text-blue-600 underline">
-          Back to search
-        </Link>
-      </Layout>
-    );
-  }
-
-  const user: FullUserProfile = profileData.data.user_profile;
+  const summary = toSummary(profile);
+  const postsCount =
+    profile.posts_count ?? (profile as { posts?: number }).posts;
 
   return (
-    <Layout title={user.fullname}>
-      <Link to="/" className="text-sm text-blue-600 mb-4 inline-block">
-        ← Back to search
-      </Link>
+    <Layout>
+      <BackButton onClick={() => navigate(-1)} />
 
-      <div className="flex gap-6 items-start text-left max-w-2xl mx-auto">
-        <img
-          src={user.picture}
-          className="w-24 h-24 rounded-full border"
-        />
-        <div className="flex-1">
-          <h2 className="text-xl font-bold">
-            @{user.username}
-            <VerifiedBadge verified={user.is_verified} />
-          </h2>
-          <p className="text-gray-600">{user.fullname}</p>
-          <p className="text-xs text-gray-400 mt-1">Platform: {platform}</p>
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-slate-900/60 shadow-2xl shadow-black/40">
+        <div className={`relative px-6 pt-8 pb-24 sm:px-10 ${theme.banner}`}>
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,255,255,0.08),transparent_50%)]" />
 
-          {user.description && (
-            <p className="mt-3 text-sm text-gray-700">{user.description}</p>
-          )}
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span
+                className={`rounded-full border px-3 py-1 text-xs font-bold uppercase tracking-wider ${theme.badge}`}
+              >
+                {platform}
+              </span>
+              {profile.is_verified && (
+                <span className="rounded-full border border-sky-500/30 bg-sky-500/15 px-3 py-1 text-xs font-semibold text-sky-200">
+                  Verified
+                </span>
+              )}
+            </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-            <div className="border p-2 rounded">
-              <div className="text-gray-500">Followers</div>
-              <div className="font-semibold">
-                {formatFollowersDetail(user.followers)}
+            <ShortlistButton
+              size="lg"
+              isSelected={isSelected}
+              onToggle={(e) => {
+                e.stopPropagation();
+                if (isSelected) {
+                  removeProfile(profile.user_id);
+                } else {
+                  addProfile(summary);
+                }
+              }}
+            />
+          </div>
+        </div>
+
+        <div className="relative -mt-16 px-6 pb-8 sm:px-10">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div className="flex flex-col items-start gap-5 sm:flex-row sm:items-end">
+              <img
+                src={profile.picture}
+                alt={profile.fullname}
+                className="h-28 w-28 rounded-2xl object-cover ring-4 ring-slate-900 shadow-2xl sm:h-32 sm:w-32"
+                onError={(e) => {
+                  e.currentTarget.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.fullname)}&background=1e293b&color=fff`;
+                }}
+              />
+              <div className="pb-1">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <h1 className="text-3xl font-extrabold tracking-tight text-white sm:text-4xl">
+                    {profile.fullname}
+                  </h1>
+                  <VerifiedBadge verified={profile.is_verified} />
+                </div>
+                <p className={`text-lg font-medium ${theme.accent}`}>
+                  @{profile.username}
+                </p>
+                {profile.description && (
+                  <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-400">
+                    {profile.description}
+                  </p>
+                )}
               </div>
             </div>
-            <div className="border p-2 rounded">
-              <div className="text-gray-500">Engagement Rate</div>
-              <div className="font-semibold">
-                {user.engagement_rate !== undefined
-                  ? (user.engagement_rate * 10000).toFixed(2) + "%"
-                  : "N/A"}
-              </div>
-            </div>
-            {user.posts_count !== undefined && (
-              <div className="border p-2 rounded">
-                <div className="text-gray-500">Posts</div>
-                <div className="font-semibold">{user.posts_count}</div>
-              </div>
-            )}
-            {user.avg_likes !== undefined && (
-              <div className="border p-2 rounded">
-                <div className="text-gray-500">Avg Likes</div>
-                <div className="font-semibold">
-                  {formatFollowersDetail(user.avg_likes)}
-                </div>
-              </div>
-            )}
-            {user.avg_comments !== undefined && (
-              <div className="border p-2 rounded">
-                <div className="text-gray-500">Avg Comments</div>
-                <div className="font-semibold">{user.avg_comments}</div>
-              </div>
-            )}
-            {user.avg_views !== undefined && user.avg_views > 0 && (
-              <div className="border p-2 rounded">
-                <div className="text-gray-500">Avg Views</div>
-                <div className="font-semibold">
-                  {formatFollowersDetail(user.avg_views)}
-                </div>
-              </div>
-            )}
-            {user.engagements !== undefined && (
-              <div className="border p-2 rounded">
-                <div className="text-gray-500">Engagements</div>
-                <div className="font-semibold">
-                  {formatEngagementRate(user.engagement_rate)}
-                </div>
-              </div>
-            )}
           </div>
 
-          {user.url && (
-            <a
-              href={user.url}
-              target="_blank"
-              className="inline-block mt-4 text-blue-600 text-sm"
-            >
-              View on platform →
-            </a>
-          )}
+          <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {/* Switched the massive numbers to use formatCompactNumber */}
+            <StatBox
+              label="Followers"
+              value={formatCompactNumber(profile.followers)}
+              highlight
+            />
+            <StatBox
+              label="Engagement"
+              value={formatRate(profile.engagement_rate)}
+            />
+            <StatBox label="Posts" value={formatNumber(postsCount)} />
+            <StatBox
+              label="Avg likes"
+              value={formatCompactNumber(profile.avg_likes)}
+            />
+            <StatBox
+              label="Avg comments"
+              value={formatCompactNumber(profile.avg_comments)}
+            />
+            <StatBox
+              label="Engagements"
+              value={formatCompactNumber(profile.engagements)}
+            />
+          </div>
 
-          {/* TODO: candidates must implement Add to List feature */}
-          {/* TODO: candidates must implement Add to List feature */}
-          <button
-            disabled
-            className="block mt-4 px-4 py-2 bg-gray-300 text-gray-500 rounded cursor-not-allowed"
-          >
-            Add to List
-          </button>
+          {(profile.avg_views || profile.gender || profile.age_group) && (
+            <div className="mt-6 flex flex-wrap gap-2">
+              {profile.avg_views != null && profile.avg_views > 0 && (
+                <MetaChip
+                  label={`${formatCompactNumber(profile.avg_views)} avg views`}
+                />
+              )}
+              {profile.gender && <MetaChip label={profile.gender} />}
+              {profile.age_group && (
+                <MetaChip label={`Age ${profile.age_group}`} />
+              )}
+            </div>
+          )}
         </div>
       </div>
     </Layout>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="mb-6 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-400 transition-colors hover:border-white/20 hover:text-white"
+    >
+      ← Back to search
+    </button>
+  );
+}
+
+function StatBox({
+  label,
+  value,
+  highlight = false,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <div
+      /* THIS IS THE FIX: min-w-0 flex flex-col justify-center strictly contains the text */
+      className={`min-w-0 flex flex-col justify-center rounded-2xl border p-4 transition-colors ${
+        highlight
+          ? "border-indigo-500/30 bg-indigo-500/10"
+          : "border-white/10 bg-white/5 hover:border-indigo-500/20 hover:bg-indigo-500/5"
+      }`}
+    >
+      {/* Added truncate so it cuts off instead of breaking the layout */}
+      <span className="mb-1 block truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+        {label}
+      </span>
+      {/* Added truncate and a title attribute so users can hover to see the full number */}
+      <span
+        className={`block truncate text-lg font-bold sm:text-xl ${highlight ? "text-indigo-200" : "text-white"}`}
+        title={value}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function MetaChip({ label }: { label: string }) {
+  return (
+    <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300">
+      {label}
+    </span>
   );
 }

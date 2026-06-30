@@ -15,25 +15,49 @@ export function getSearchData(platform: Platform): SearchData {
 
 export function extractProfiles(platform: Platform): UserProfileSummary[] {
   const data = getSearchData(platform);
-  return data.accounts.map((item) => item.account.user_profile);
+
+  return data.accounts.map((item) => {
+    const user = item.account.user_profile as UserProfileSummary & {
+      handle?: string;
+    };
+
+    return {
+      ...user,
+      username:
+        user.username ??
+        user.handle ??
+        user.fullname.replace(/\s+/g, "").toLowerCase(),
+    };
+  });
 }
 
 export function filterProfiles(
   profiles: UserProfileSummary[],
-  query: string
+  query: string,
 ): UserProfileSummary[] {
-  if (!query) return profiles;
-  return profiles.filter((p) => {
-    const matchUsername = p.username.includes(query);
-    const matchFullname = p.fullname.toLowerCase().includes(query.toLowerCase());
-    return matchUsername || matchFullname;
+  const search = query.trim().toLowerCase();
+
+  if (!search) return profiles;
+
+  return profiles.filter((profile) => {
+    const username = (profile.username ?? "").toLowerCase();
+    const fullname = (profile.fullname ?? "").toLowerCase();
+
+    return username.includes(search) || fullname.includes(search);
   });
 }
 
 export const PLATFORMS: Platform[] = ["instagram", "youtube", "tiktok"];
 
 export function getPlatformLabel(platform: Platform): string {
-  if (platform === "instagram") return "Instagram";
-  if (platform === "youtube") return "YouTube";
-  return "TikTok";
+  switch (platform) {
+    case "instagram":
+      return "Instagram";
+    case "youtube":
+      return "YouTube";
+    case "tiktok":
+      return "TikTok";
+    default:
+      return platform;
+  }
 }
